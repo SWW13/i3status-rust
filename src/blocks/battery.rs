@@ -195,7 +195,7 @@ pub struct Battery {
     id: String,
     update_interval: Duration,
     device: PowerSupplyDevice,
-    show: Vec<ShowType>,
+    show: ShowType,
 }
 
 /// Options for displaying battery information.
@@ -205,6 +205,10 @@ pub enum ShowType {
     Time,
     Percentage,
     Watt,
+    Both,
+    TimeWatt,
+    PercentageWatt,
+    TimePercentageWatt,
 }
 
 /// Configuration for the [`Battery`](./struct.Battery.html) block.
@@ -222,7 +226,7 @@ pub struct BatteryConfig {
 
     /// Options for displaying battery information.
     #[serde(default = "BatteryConfig::default_show")]
-    pub show: Vec<ShowType>,
+    pub show: ShowType,
 }
 
 impl BatteryConfig {
@@ -234,8 +238,8 @@ impl BatteryConfig {
         "BAT0".to_string()
     }
 
-    fn default_show() -> Vec<ShowType> {
-        vec![ShowType::Percentage]
+    fn default_show() -> ShowType {
+        ShowType::Percentage
     }
 }
 
@@ -269,26 +273,44 @@ impl Block for Battery {
 
             // Don't break the whole bar if we can't compute capacity or
             // time at this point.
-            if self.show.contains(&ShowType::Percentage) {
-                match capacity {
-                    Ok(capacity) => text.push_str(&format!("{}% ", capacity)),
-                    Err(_) => text.push_str("× "),
-                };
+            match self.show {
+                ShowType::Both |
+                ShowType::Percentage |
+                ShowType::PercentageWatt |
+                ShowType::TimePercentageWatt => {
+                    match capacity {
+                        Ok(capacity) => text.push_str(&format!("{}% ", capacity)),
+                        Err(_) => text.push_str("× "),
+                    };
+                },
+                _ => { }
             }
             // Unlike capacity, we don't use time remaining to identify the
             // state. So we can avoid computing it entirely when the user
             // didn't ask for it.
-            if self.show.contains(&ShowType::Time) {
-                match self.device.time_remaining() {
-                    Ok(time) => text.push_str(&format!("{}:{:02}", time / 60, time % 60)),
-                    Err(_) => text.push_str("× "),
-                };
+            match self.show {
+                ShowType::Both |
+                ShowType::Time |
+                ShowType::TimeWatt |
+                ShowType::TimePercentageWatt => {
+                    match self.device.time_remaining() {
+                        Ok(time) => text.push_str(&format!("{}:{:02} ", time / 60, time % 60)),
+                        Err(_) => text.push_str("× "),
+                    };
+                },
+                _ => { }
             }
-            if self.show.contains(&ShowType::Watt) {
-                match self.device.consumption() {
-                    Ok(consumption) => text.push_str(&format!("{:.2}W ", consumption as f64 / 1000.0 / 1000.0)),
-                    Err(_) => text.push_str("× "),
-                };
+            match self.show {
+                ShowType::Watt |
+                ShowType::TimeWatt |
+                ShowType::PercentageWatt |
+                ShowType::TimePercentageWatt => {
+                    match self.device.consumption() {
+                        Ok(consumption) => text.push_str(&format!("{:.2}W ", consumption as f64 / 1000.0 / 1000.0)),
+                        Err(_) => text.push_str("× "),
+                    };
+                },
+                _ => { }
             }
 
             // Set text without trailing whitespace
