@@ -171,6 +171,22 @@ impl PowerSupplyDevice {
             }
         }
     }
+
+    /// Query the current power consumption in uW
+    pub fn consumption(&self) -> Result<u64> {
+        let power_path = self.device_path.join("power_now");
+
+        if power_path.exists() {
+            Ok(read_file("battery", &power_path)?
+                .parse::<u64>()
+                .block_error("battery", "failed to parse power_now")?)
+        } else {
+            Err(BlockError(
+                "battery".to_string(),
+                "Device does not support power consumption".to_string(),
+            ))
+        }
+    }
 }
 
 /// A block for displaying information about an internal power supply.
@@ -179,16 +195,16 @@ pub struct Battery {
     id: String,
     update_interval: Duration,
     device: PowerSupplyDevice,
-    show: ShowType,
+    show: Vec<ShowType>,
 }
 
 /// Options for displaying battery information.
-#[derive(Deserialize, Copy, Clone, Debug)]
+#[derive(Deserialize, Copy, Clone, Debug, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ShowType {
     Time,
     Percentage,
-    Both,
+    Watt,
 }
 
 /// Configuration for the [`Battery`](./struct.Battery.html) block.
@@ -206,7 +222,7 @@ pub struct BatteryConfig {
 
     /// Options for displaying battery information.
     #[serde(default = "BatteryConfig::default_show")]
-    pub show: ShowType,
+    pub show: Vec<ShowType>,
 }
 
 impl BatteryConfig {
@@ -218,8 +234,8 @@ impl BatteryConfig {
         "BAT0".to_string()
     }
 
-    fn default_show() -> ShowType {
-        ShowType::Percentage
+    fn default_show() -> Vec<ShowType> {
+        vec![ShowType::Percentage]
     }
 }
 
@@ -249,32 +265,36 @@ impl Block for Battery {
             self.output.set_state(State::Good);
         } else {
             let capacity = self.device.capacity();
-            match self.show {
-                // Don't break the whole bar if we can't compute capacity or
-                // time at this point.
-                ShowType::Percentage => match capacity {
-                    Ok(capacity) => self.output.set_text(format!("{}%", capacity)),
-                    Err(_) => self.output.set_text("×".to_string()),
-                },
-                // Unlike capacity, we don't use time remaining to identify the
-                // state. So we can avoid computing it entirely when the user
-                // didn't ask for it.
-                ShowType::Time => match self.device.time_remaining() {
-                    Ok(time) => self.output.set_text(format!("{}:{:02}", time / 60, time % 60)),
-                    Err(_) => self.output.set_text("×".to_string()),
-                },
-                ShowType::Both => {
-                    let capacity =  match capacity {
-                        Ok(capacity) => format!("{}%", capacity),
-                        Err(_) => "×".to_string(),
-                    };
-                    let time =  match self.device.time_remaining() {
-                        Ok(time) => format!("{}:{:02}", time / 60, time % 60),
-                        Err(_) => "×".to_string(),
-                    };
-                    self.output.set_text(format!("{} {}", capacity, time))
-                },
+            let mut text = String::new();
+
+            // Don't break the whole bar if we can't compute capacity or
+            // time at this point.
+            if self.show.contains(&ShowType::Percentage) {
+                match capacity {
+                    Ok(capacity) => text.push_str(&format!("{}% ", capacity)),
+                    Err(_) => text.push_str("× "),
+                };
             }
+            // Unlike capacity, we don't use time remaining to identify the
+            // state. So we can avoid computing it entirely when the user
+            // didn't ask for it.
+            if self.show.contains(&ShowType::Time) {
+                match self.device.time_remaining() {
+                    Ok(time) => text.push_str(&format!("{}:{:02}", time / 60, time % 60)),
+                    Err(_) => text.push_str("× "),
+                };
+            }
+            if self.show.contains(&ShowType::Watt) {
+                match self.device.consumption() {
+                    Ok(consumption) => text.push_str(&format!("{:.2}W ", consumption as f64 / 1000.0 / 1000.0)),
+                    Err(_) => text.push_str("× "),
+                };
+            }
+
+            // Set text without trailing whitespace
+            let len = text.len() - 1;
+            text.truncate(len);
+            self.output.set_text(text);
 
             // Check if the battery is in charging mode and change the state to Good.
             // Otherwise, adjust the state depeding the power percentance.
