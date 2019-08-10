@@ -83,6 +83,18 @@ impl BluetoothDevice {
         })
     }
 
+    pub fn from_path(path: String, icon: Option<String>, label: Option<String>) -> Result<Self> {
+        let con = dbus::ffidisp::Connection::get_private(dbus::ffidisp::BusType::System)
+            .block_error("bluetooth", "Failed to establish D-Bus connection.")?;
+
+        Ok(BluetoothDevice {
+            path,
+            icon,
+            label: label.unwrap_or_else(|| "".to_string()),
+            con,
+        })
+    }
+
     pub fn battery(&self) -> Option<u8> {
         // Swallow errors here; not all devices implement this API.
         self.con
@@ -166,6 +178,8 @@ pub struct Bluetooth {
 pub struct BluetoothConfig {
     pub mac: String,
     pub label: Option<String>,
+    pub path: Option<String>,
+    pub icon: Option<String>,
     #[serde(default = "BluetoothConfig::default_hide_disconnected")]
     pub hide_disconnected: bool,
     #[serde(default = "BluetoothConfig::default_color_overrides")]
@@ -187,7 +201,10 @@ impl ConfigBlock for Bluetooth {
 
     fn new(block_config: Self::Config, config: Config, send: Sender<Task>) -> Result<Self> {
         let id: String = pseudo_uuid();
-        let device = BluetoothDevice::new(block_config.mac, block_config.label)?;
+        let device = match block_config.path {
+            Some(path) => BluetoothDevice::from_path(path, block_config.icon, block_config.label)?,
+            None => BluetoothDevice::new(block_config.mac, block_config.label)?,
+        };
         device.monitor(id.clone(), send);
 
         Ok(Bluetooth {
