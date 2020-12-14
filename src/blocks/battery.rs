@@ -482,6 +482,7 @@ pub struct Battery {
     device: Box<dyn BatteryDevice>,
     format: FormatTemplate,
     full_format: FormatTemplate,
+    not_charging_format: FormatTemplate,
     missing_format: FormatTemplate,
     allow_missing: bool,
     hide_missing: bool,
@@ -534,6 +535,11 @@ pub struct BatteryConfig {
     /// placeholders: {percentage}, {bar}, {time} and {power}
     #[serde(default = "BatteryConfig::default_full_format")]
     pub full_format: String,
+
+    /// Format string for displaying battery information when battery is not charging.
+    /// placeholders: {percentage}, {bar}, {time} and {power}
+    #[serde(default = "BatteryConfig::default_not_charging_format")]
+    pub not_charging_format: String,
 
     /// Format string that's displayed if a battery is missing.
     /// placeholders: {percentage}, {bar}, {time} and {power}
@@ -590,6 +596,10 @@ impl BatteryConfig {
 
     fn default_full_format() -> String {
         "".into()
+    }
+
+    fn default_not_charging_format() -> String {
+        "{percentage}%".into()
     }
 
     fn default_missing_format() -> String {
@@ -677,6 +687,7 @@ impl ConfigBlock for Battery {
             device,
             format: FormatTemplate::from_string(&format)?,
             full_format: FormatTemplate::from_string(&block_config.full_format)?,
+            not_charging_format: FormatTemplate::from_string(&block_config.not_charging_format)?,
             missing_format: FormatTemplate::from_string(&block_config.missing_format)?,
             allow_missing: block_config.allow_missing,
             hide_missing: block_config.hide_missing,
@@ -748,15 +759,20 @@ impl Block for Battery {
                             "{time}" => time,
                             "{power}" => power);
 
-        if status == "Full" || status == "Not charging" {
+        if status == "Full" {
             self.output.set_icon("bat_full");
             self.output
                 .set_text(self.full_format.render_static_str(&values)?);
             self.output.set_state(State::Good);
             self.output.set_spacing(Spacing::Hidden);
         } else {
-            self.output
-                .set_text(self.format.render_static_str(&values)?);
+            if status == "Not charging" || status == "Unknown" {
+                self.output
+                    .set_text(self.not_charging_format.render_static_str(&values)?)
+            } else {
+                self.output
+                    .set_text(self.format.render_static_str(&values)?)
+            }
 
             // Check if the battery is in charging mode and change the state to Good.
             // Otherwise, adjust the state depeding the power percentance.
