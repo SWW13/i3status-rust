@@ -546,6 +546,11 @@ pub struct BatteryConfig {
     #[serde(default = "BatteryConfig::default_missing_format")]
     pub missing_format: String,
 
+    /// Format string for displaying battery information when battery is not charging.
+    /// placeholders: {percentage}, {bar}, {time} and {power}
+    #[serde(default = "BatteryConfig::default_unknown_format")]
+    pub unknown_format: String,
+
     /// (DEPRECATED) Use UPower to monitor battery status and events.
     #[serde(default = "BatteryConfig::default_upower")]
     pub upower: bool,
@@ -603,6 +608,10 @@ impl BatteryConfig {
     }
 
     fn default_missing_format() -> String {
+        "{percentage}%".into()
+    }
+
+    fn default_unknown_format() -> String {
         "{percentage}%".into()
     }
 
@@ -766,13 +775,14 @@ impl Block for Battery {
             self.output.set_state(State::Good);
             self.output.set_spacing(Spacing::Hidden);
         } else {
-            if status == "Not charging" || status == "Unknown" {
-                self.output
-                    .set_text(self.not_charging_format.render_static_str(&values)?)
-            } else {
-                self.output
-                    .set_text(self.format.render_static_str(&values)?)
-            }
+            self.output.set_text(
+                match status.as_str() {
+                    "Not charging" => &self.not_charging_format,
+                    "Unknown" => &self.not_charging_format,
+                    _ => &self.format,
+                }
+                .render_static_str(&values)?,
+            );
 
             // Check if the battery is in charging mode and change the state to Good.
             // Otherwise, adjust the state depeding the power percentance.
